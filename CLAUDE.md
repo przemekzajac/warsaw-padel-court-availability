@@ -18,9 +18,11 @@ Każdego dnia roboczego rano (07:00 Europe/Warsaw) odpalany jest skill `padel-ch
 | `padlovnia` | Padlovnia | kluby.org |
 | `mana-padel` | Mana Padel | kluby.org |
 | `toro-padel` | Toro Padel | kluby.org |
-| `loba-padel` | Loba Padel | kluby.org |
+| `loba-padel` | Loba Padel | Playtomic |
 | `interpadel-warszawa` | Inter Padel Warszawa | Playtomic |
 | `warsaw-padel-club` | Warsaw Padel Club | Playtomic |
+
+Niektóre kluby mają korty singlowe które chcemy pomijać. Listy znanych singli (gdy nie da się tego wyczytać z DOM-u) są w polu `skipCourts` w `clubs.json`.
 
 Definicje + URL templates: `.claude/skills/padel-check/clubs.json`.
 
