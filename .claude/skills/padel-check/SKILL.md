@@ -69,7 +69,7 @@ Read `.claude/skills/padel-check/clubs.json`. Dla każdego klubu masz `key`, `di
 
 **Wymagane** — kluby.org pokazuje grafik rezerwacji **tylko zalogowanym** użytkownikom (anonimowi widzą stronę bez tabeli). Login wykonaj **raz** na początku, sesja Playwright zachowa cookie dla wszystkich kolejnych nawigacji.
 
-Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje — pomiń login, oznacz wszystkie 4 kluby × 5 dat z grupy `kluby` jako `notChecked` z reason `"missing kluby.org credentials"`, dopisz każdą z tych 20 par do `processedPairs`, i przejdź do Kroku 3 (Playtomic nadal może być scrape'owany).
+Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje — pomiń login, oznacz wszystkie kluby z grupy `kluby` × 5 dat (zwykle 3 kluby = 15 par) jako `notChecked` z reason `"missing kluby.org credentials"`, dopisz każdą z tych par do `processedPairs`, i przejdź do Kroku 3 (Playtomic nadal może być scrape'owany).
 
 ### Procedura
 
@@ -84,7 +84,7 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
    - W snapshocie widać element wskazujący zalogowanego usera (np. link "Wyloguj", "Moje konto", inicjały / avatar usera, sekcja `nav` z user menu)
    - Brak komunikatu błędu typu `Nieprawidłowy login`, `Invalid credentials`
 8. Jeśli sukces → przejdź do Kroku 3.
-9. Jeśli login się nie udał (komunikat błędu, formularz nadal widoczny po 2s): oznacz wszystkie 4 kluby × 5 dat z grupy `kluby` jako `notChecked` z konkretnym reason (np. `"login failed: Nieprawidłowy login"` jeśli widzisz taki komunikat, lub `"login failed: form still visible after submit"` jeśli zgadujesz). Dopisz każdą z tych 20 par do `processedPairs`. Idź dalej do Kroku 3 dla samych klubów Playtomic. **Bez retry loginu.**
+9. Jeśli login się nie udał (komunikat błędu, formularz nadal widoczny po 2s): oznacz wszystkie kluby z grupy `kluby` × 5 dat (zwykle 3 kluby = 15 par) jako `notChecked` z konkretnym reason (np. `"login failed: Nieprawidłowy login"` jeśli widzisz taki komunikat, lub `"login failed: form still visible after submit"` jeśli zgadujesz). Dopisz każdą z tych par do `processedPairs`. Idź dalej do Kroku 3 dla klubów Playtomic. **Bez retry loginu.**
 
 **Bezpieczeństwo:** nie loguj wartości `$KLUBY_PASSWORD` ani snapshotów strony logowania zawierających pole hasła do żadnego outputu (stdout, mail, raport). Komunikat błędu w mailu może zawierać tekst widoczny dla anonimowego usera (np. "Nieprawidłowy login"), ale **nie** zrzutu DOM ani wpisanej wartości pola.
 
@@ -95,8 +95,10 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
 Inicjalizacja: brak — sesja Chromium już aktywna od Kroku 2.5 (lub od pierwszego navigate, jeśli login pominięty).
 
 **Kolejność iteracji:**
-1. Najpierw wszystkie pary z grupy `kluby` (4 kluby × 5 dat = 20 par) — sesja jest świeżo zalogowana, cookie ważne.
-2. Potem wszystkie pary z grupy `playtomic` (2 × 5 = 10 par) — Playtomic nie wymaga loginu.
+1. Najpierw wszystkie pary z grupy `kluby` (zwykle 3 kluby × 5 dat = 15 par) — sesja jest świeżo zalogowana, cookie ważne.
+2. Potem wszystkie pary z grupy `playtomic` (zwykle 3 × 5 = 15 par) — Playtomic nie wymaga loginu.
+
+(Suma zawsze = liczba klubów w `clubs.json` × 5 dat. Konkretne liczby per grupa wynikają z `clubs.json` i mogą się zmieniać gdy klub przechodzi między systemami rezerwacji.)
 
 Sekwencyjnie. **Bez równoległości.** Pomijaj pary już oznaczone jako `notChecked` w Kroku 2.5.
 
@@ -130,11 +132,24 @@ Po wszystkich parach: `mcp__playwright__browser_close()`.
 
 #### Filtr kortów singlowych (wspólny dla obu grup)
 
-**Pomijaj korty oznaczone jako singlowe** — gracz interesuje się tylko kortami deblowymi (do gry 2v2).
+**Pomijaj korty oznaczone jako singlowe** — gracz interesuje się tylko kortami deblowymi (do gry 2v2). Stosuj **dwie warstwy filtrowania**, niezależnie:
 
-Kort jest singlowy, jeśli jego nazwa / nagłówek kolumny / `aria-label` zawiera (case-insensitive) podciąg `singl`. Pasuje do wszystkich form: `single`, `Single`, `SINGLES`, `singiel`, `Singla`, `Kort singlowy`, `Pole singlowe`, `padel single`, itd. Polski rdzeń `singl-` i angielski `singl-` mają wspólny prefix, więc jedno sprawdzenie wystarczy.
+**Warstwa 1 — explicit `skipCourts` z `clubs.json`** (deterministyczne):
 
-Jeśli nazwa kortu pasuje do tego wzorca → **w ogóle nie generuj `rawSlots` dla tego kortu**. Jego dostępność nie wchodzi do unionu w Kroku 4.
+Niektóre kluby są w `clubs.json` z polem `skipCourts: [...]`. To są **znane** korty singlowe które ten klub nie oznacza w widocznym DOM-ie. Przy parsowaniu danego klubu pomiń każdy kort którego nazwa pasuje (case-insensitive substring match) do dowolnego elementu z `skipCourts`. Przykład: `interpadel-warszawa` ma `["kort 10", "kort 11"]` — odrzuć korty których etykieta zawiera `kort 10` lub `kort 11`.
+
+**Warstwa 2 — heurystyka DOM** (catch-all):
+
+Niezależnie od `skipCourts`, pomiń kort jeśli **jakikolwiek** z poniższych tekstów (case-insensitive) zawiera podciąg `singl`:
+- nazwa / nagłówek kolumny / nagłówek wiersza
+- `aria-label` na korcie lub jego rodzicu/rodzeństwie
+- atrybuty `data-*` (np. `data-court-type="singles"`)
+- tooltip / `<title>` / opis pod nazwą
+- klasy CSS na kontenerze kortu (np. `class="court court--singles"`)
+
+`/singl/i` łapie polskie i angielskie formy: `single`, `Single`, `SINGLES`, `singiel`, `Singla`, `Kort singlowy`, `Pole singlowe`. Polski rdzeń `singl-` i angielski `singl-` mają wspólny prefix.
+
+Jeśli kort pasuje do **dowolnej** warstwy → **w ogóle nie generuj `rawSlots` dla tego kortu**. Nie wchodzi do unionu w Kroku 4. Jeśli nie jesteś pewny — odrzuć (false positive jest bezpieczniejszy niż fałszywe okno z singlowego kortu).
 
 #### Grupa `kluby` (kluby.org)
 
@@ -276,64 +291,110 @@ Ten check chroni przed cichym pominięciem klubu (np. agent zapomniał o jednym 
 
 ---
 
-## Krok 5 — Render markdown
+## Krok 5 — Render HTML (i fallback plain text)
+
+Mail wysyłany jest **jako HTML** (lepsze formatowanie w Gmailu) z plain-text fallbackiem. Renderuj **oba**.
 
 ### Sortowanie
-- Sekcje per klub — alfabetycznie po `displayName`.
-- W sekcji: po dacie ↑, potem po `start` ↑.
+
+- Sekcje per klub — alfabetycznie po `displayName`. Sekcja klubu pojawia się **zawsze** (nawet gdy brak wolnych okien — wtedy pokazuje notkę o braku, patrz niżej).
+- W sekcji klubu: pogrupowane po dacie ↑, w grupie daty po `start` ↑.
 
 ### Mapowanie dni tygodnia (PL)
+
 `Mon→poniedziałek, Tue→wtorek, Wed→środa, Thu→czwartek, Fri→piątek`.
 
-### Format wpisu
+### Format długości
+
+`1.5h`, `2h`, `2.5h`, `3h`, ... (jeśli całkowita liczba godzin → bez ułamka; inaczej `.5h`).
+
+Bez liczby kortów. Bez nazw kortów. Wystarczy info, że w tym przedziale jakiś (deblowy, niesinglowy) kort jest wolny.
+
+### Klub bez wolnych slotów (≠ klub w `notChecked`)
+
+Jeśli klub ma `clubReportSlots[klub]` puste dla wszystkich 5 dat **i** żadna z 5 dat tego klubu nie jest w `notChecked` (czyli udało się sprawdzić wszystkie dni, ale nigdzie nie ma wolnego okna ≥1.5h) — **pokaż sekcję klubu** z notką:
+
+> Brak wolnych kortów w dniach {date_first}–{date_last} w przedziale 17:00–23:00.
+
+(`date_first` = pierwsza z 5 sprawdzonych dat, `date_last` = ostatnia, format `DD.MM`.)
+
+### Klub częściowo w `notChecked`
+
+Jeśli klub ma niektóre daty w `clubReportSlots` z wolnymi oknami, a niektóre w `notChecked` — pokaż sekcję klubu **plus** wymień nieudane daty na końcu sekcji klubu:
+
+> _Nie sprawdzono: DD.MM.YYYY — reason_
+
+### Szablon HTML
+
+Inline styles (Gmail nie ładuje zewnętrznych stylesheetów ani `<style>` w `<head>`). Max-width 600px, system font stack.
+
+```html
+<!DOCTYPE html><html><body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif;max-width:600px;margin:0 auto;color:#1a1a1a;line-height:1.5;font-size:15px;">
+
+<h1 style="font-size:22px;margin:0 0 4px 0;">Dostępność kortów padlowych</h1>
+<p style="color:#666;margin:0 0 24px 0;font-size:13px;">Sprawdzono: {date_first_full}–{date_last_full} (5 dni roboczych)</p>
+
+<!-- per klub: -->
+<h2 style="margin:24px 0 8px 0;padding-bottom:4px;border-bottom:2px solid #eee;font-size:17px;">{Display Name}</h2>
+
+<!-- jeśli klub ma sloty: dla każdej daty z wolnymi oknami: -->
+<p style="margin:12px 0 4px 0;font-weight:600;font-size:14px;color:#333;">{DD.MM} {dzień_tygodnia}</p>
+<ul style="margin:0 0 8px 0;padding-left:20px;">
+  <li style="margin:2px 0;">{HH:MM}–{HH:MM} <span style="color:#888;font-size:13px;">({Xh})</span></li>
+</ul>
+
+<!-- jeśli klub bez slotów (sprawdzony, brak okien): -->
+<p style="color:#888;font-style:italic;margin:8px 0 0 0;font-size:14px;">Brak wolnych kortów w dniach {DD.MM}–{DD.MM} w przedziale 17:00–23:00.</p>
+
+<!-- jeśli klub częściowo nie sprawdzony: doklej na końcu sekcji: -->
+<p style="color:#b85a00;font-style:italic;margin:8px 0 0 0;font-size:13px;">Nie sprawdzono: {DD.MM.YYYY} — {reason}</p>
+
+<!-- sekcja Nie sprawdzono (globalna) — TYLKO jeśli któreś z (klub,data) są w notChecked: -->
+<h2 style="margin:32px 0 8px 0;padding-bottom:4px;border-bottom:2px solid #eee;font-size:17px;color:#b85a00;">⚠️ Nie sprawdzono</h2>
+<ul style="margin:0;padding-left:20px;">
+  <li style="margin:2px 0;">{Klub} ({DD.MM.YYYY}) — {konkretny reason}</li>
+</ul>
+
+</body></html>
+```
+
+Format `{date_first_full}` / `{date_last_full}`: `DD.MM.YYYY`. Format `{DD.MM}` używaj wewnątrz sekcji klubów (rok wynika z kontekstu nagłówka).
+
+### Szablon plain text (fallback)
+
+Wysyłany w `text` polu Resend dla klientów bez HTML (rzadkie):
 
 ```
-- DD.MM.YYYY (dzień_tygodnia), HH:MM–HH:MM (Xh)
+Dostępność kortów padlowych
+Sprawdzono: {date_first_full}–{date_last_full} (5 dni roboczych)
+
+{Display Name 1}
+  {DD.MM} {dzień}:
+    - HH:MM–HH:MM (Xh)
+    - HH:MM–HH:MM (Xh)
+  {DD.MM} {dzień}:
+    - HH:MM–HH:MM (Xh)
+
+{Display Name 2}
+  Brak wolnych kortów w dniach {DD.MM}–{DD.MM} w przedziale 17:00–23:00.
+
+⚠️ Nie sprawdzono
+  - {Klub} ({DD.MM.YYYY}) — {reason}
 ```
 
-Format długości: `1.5h`, `2h`, `2.5h`, `3h`, ... (jeśli całkowita liczba godzin → bez ułamka; inaczej `.5h`).
+### Szablon — wszystkie kluby bez wolnych slotów
 
-Bez liczby kortów. Bez nazw kortów. Wystarczy info że w tym przedziale jakiś kort jest wolny.
+Jeśli żaden klub × żadna data nie ma `clubReportSlots` z wolnymi oknami **i** żadna nie jest w `notChecked` (czyli wszystkie 30 par sprawdzone, wszystkie wynik = brak okna ≥1.5h):
 
-### Klub bez wolnych slotów
-
-Jeśli klub ma `clubReportSlots[klub]` puste dla wszystkich 5 dat (i nie wszystkie 5 dat klubu są w `notChecked`) — **pomiń sekcję klubu w mailu**. Brak sekcji = brak wolnych kortów, czytelne dla odbiorcy.
-
-### Szablon — są wolne sloty
-
-```markdown
-# Dostępność kortów padlowych — {today_iso}
-
-Sprawdzono dni: {date1_pl}, {date2_pl}, {date3_pl}, {date4_pl}, {date5_pl}
-
-## {Display Name 1}
-- {entry}
-- {entry}
-
-## {Display Name 2}
-- {entry}
-
-## ⚠️ Nie sprawdzono
-- {Klub} ({DD.MM.YYYY}) — {konkretny reason}
+```html
+<p>W najbliższych 5 dniach roboczych żaden warszawski klub padlowy nie ma wolnego kortu w godzinach 17:00–23:00 na min. 1.5h gry.</p>
 ```
 
-Format `{dateN_pl}`: `DD.MM.YYYY`.
+### Sekcja "⚠️ Nie sprawdzono" — globalna
 
-### Szablon — brak slotów (gdy żaden klub nie ma wolnych okien po unionie + filtrze)
+Dodaj **tylko gdy `notChecked` jest niepusta**. Globalna sekcja na końcu listuje wszystkie nieudane (klub, data) pary. Sekcje per-klub mogą duplikować to (jak wyżej w "częściowo nie sprawdzony") — to OK, redundancja jest pożądana.
 
-```markdown
-# Dostępność kortów padlowych — {today_iso}
-
-Sprawdzono dni: {date1_pl}, {date2_pl}, {date3_pl}, {date4_pl}, {date5_pl}
-
-W najbliższych 5 dniach roboczych żaden warszawski klub padlowy nie ma wolnego kortu w godzinach 17:00–23:00 na min. 1.5h gry.
-```
-
-### Sekcja "⚠️ Nie sprawdzono"
-
-Dodaj **tylko gdy `notChecked` jest niepusta**. Pomiń całkowicie jeśli wszystko sprawdzone.
-
-Jeśli **wszystkie** kluby × wszystkie daty są w `notChecked` → raport zawiera tylko nagłówek + sekcję "Nie sprawdzono" (mail jest sygnałem że agent działał, ale scraping padł).
+Jeśli **wszystkie** 30 par jest w `notChecked` → raport zawiera tylko nagłówek + globalną sekcję "Nie sprawdzono".
 
 ---
 
@@ -341,26 +402,57 @@ Jeśli **wszystkie** kluby × wszystkie daty są w `notChecked` → raport zawie
 
 **Wysyłaj zawsze**, niezależnie od wyniku.
 
+### Subject — z zakresem dat (rozdziela wątki w Gmailu)
+
+Format: `Padel WWA — DD.MM–DD.MM.YYYY`
+
+`DD.MM` = pierwsza i ostatnia z 5 sprawdzonych dat (rok = rok ostatniej daty, zwykle ten sam dla obu).
+
+Przykład: dla dat sprawdzonych 04–08.05.2026 → subject `Padel WWA — 04.05–08.05.2026`.
+
+Każdy run innego dnia → inny zakres dat → inny subject → **osobny wątek w Gmailu**. (Jedyny wyjątek: dwa runy w obrębie tego samego okna 5 dni roboczych — rzadkie i wtedy złączenie ma sens.)
+
+### Body — HTML + plain text fallback
+
+Resend API przyjmuje oba: `html` (renderowany w klientach pocztowych) i `text` (fallback). Wyślij oba.
+
 ```bash
-BODY_FILE=$(mktemp)
-echo '<markdown raportu>' > "$BODY_FILE"
-PAYLOAD=$(jq -n --arg from "$MAIL_FROM" --arg to "$MAIL_TO" --rawfile body "$BODY_FILE" \
-  '{from: $from, to: [$to], subject: "Padel - wolne korty WWA", text: $body}')
+HTML_FILE=$(mktemp)
+TEXT_FILE=$(mktemp)
+echo '<html raportu z kroku 5>' > "$HTML_FILE"
+echo '<plain text raportu z kroku 5>' > "$TEXT_FILE"
+
+PAYLOAD=$(jq -n \
+  --arg from "$MAIL_FROM" \
+  --arg to "$MAIL_TO" \
+  --arg subj "Padel WWA — $DATE_FIRST–$DATE_LAST" \
+  --rawfile html "$HTML_FILE" \
+  --rawfile text "$TEXT_FILE" \
+  '{from: $from, to: [$to], subject: $subj, html: $html, text: $text}')
+
 curl -fsS -X POST https://api.resend.com/emails \
   -H "Authorization: Bearer $RESEND_API_KEY" \
   -H "Content-Type: application/json" \
   -d "$PAYLOAD"
 ```
 
-Jeśli `jq` niedostępne — zbuduj JSON ręcznie z escapowaniem (np. `node -e 'process.stdout.write(JSON.stringify({...}))'`).
+`$DATE_FIRST` / `$DATE_LAST` formatuj jako `DD.MM` dla pierwszej daty i `DD.MM.YYYY` dla ostatniej.
 
-**Subject:** dokładnie `Padel - wolne korty WWA`. Bez daty, bez emoji, bez liczników. Sztywny ciąg.
+Jeśli `jq` niedostępne — zbuduj JSON ręcznie z escapowaniem (np. `node -e 'process.stdout.write(JSON.stringify({...}))'` — pamiętaj że HTML zawiera cudzysłowy, escape jest krytyczny).
 
-**Body:** czysty markdown raportu z kroku 5. Pierwszy znak = `#` z nagłówka. Bez preambuł ("Cześć", "Pozdrawiam"), bez załączników, bez CC/BCC.
+### Reguły body
 
-**Retry:** jednokrotny. Jeśli `curl` zwróci kod ≥500 lub network error → odczekaj 5 sekund i powtórz raz. Jeśli drugi raz fail → zakończ z kodem błędu (logi routine pokażą problem w UI).
+- **HTML:** musi być z inline styles (Gmail nie ładuje `<style>` w `<head>` ani zewnętrznych CSS). Pełny dokument `<!DOCTYPE html>...</html>`.
+- **Text:** prosty, czytelny, bez markdown formatting (Gmail w plain text mode pokaże `**bold**` jako literalne gwiazdki).
+- Bez preambuł ("Cześć", "Pozdrawiam"), bez załączników, bez CC/BCC.
 
-**Po wysłaniu zakończ.** Nie generuj dodatkowego outputu w stdout poza krótkim potwierdzeniem typu `Email sent.` Raport jest dostarczony mailem.
+### Retry
+
+Jednokrotny. Jeśli `curl` zwróci kod ≥500 lub network error → odczekaj 5 sekund i powtórz raz. Jeśli drugi raz fail → zakończ z kodem błędu (logi routine pokażą problem w UI).
+
+### Po wysłaniu
+
+Zakończ. Nie generuj dodatkowego outputu w stdout poza krótkim potwierdzeniem typu `Email sent (id: …).` Raport jest dostarczony mailem.
 
 ---
 
