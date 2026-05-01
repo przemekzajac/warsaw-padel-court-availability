@@ -5,6 +5,8 @@
       "Bash(date:*)",
       "Bash(node:*)",
       "Bash(npx:*)",
+      "Bash(printf:*)",
+      "Bash(rm:*)",
       "Read",
       "mcp__playwright__browser_navigate",
       "mcp__playwright__browser_wait_for",

@@ -73,7 +73,19 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
 1. `mcp__playwright__browser_navigate(url="https://kluby.org/login")`. Jeśli redirect wskazuje że jest inna ścieżka loginu (np. `/users/sign_in`, `/zaloguj`) — podążaj za redirectem. Jeśli login jest modalem na homepage zamiast osobną stroną: navigate do `https://kluby.org/`, potem `mcp__playwright__browser_click` na link/przycisk z tekstem "Zaloguj" / "Zaloguj się" / "Login".
 2. `mcp__playwright__browser_snapshot()` — zidentyfikuj formularz logowania.
 3. Znajdź pole loginu/emaila — szukaj inputa z labelem/placeholderem zawierającym jedno z: `email`, `e-mail`, `login`, `nazwa użytkownika`, `username`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_USERNAME)`.
-4. Znajdź pole hasła — input typu `password` lub label zawierający `hasło`, `password`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_PASSWORD)`.
+4. **Wpisz hasło przez DOM injection (NIE `browser_type`).** `browser_type` z parametrem `text="$KLUBY_PASSWORD"` wpisze do inputa literalny string `"$KLUBY_PASSWORD"` zamiast wartości env var — w obecnym MCP nie ma interpolacji. Zamiast tego:
+   - Zapisz hasło do pliku tymczasowego: `printf '%s' "$KLUBY_PASSWORD" > /tmp/.kluby_pwd` (plik nigdy nie idzie do repo / maila).
+   - Odczytaj wartość przez `Read` lub `Bash cat`, podstaw do JS poniżej i odpal jednym `mcp__playwright__browser_evaluate(function=...)`:
+     ```js
+     () => {
+       const el = document.querySelector('input[type="password"]');
+       const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
+       setter.call(el, '<HASŁO_TUTAJ>');
+       el.dispatchEvent(new Event('input', { bubbles: true }));
+       el.dispatchEvent(new Event('change', { bubbles: true }));
+     }
+     ```
+   - Native value setter + ręczne `input`/`change` eventy są wymagane, bo React/Vue formy filtrują naiwne `el.value = ...`. Po wykonaniu: `rm /tmp/.kluby_pwd`.
 5. Submit — kliknij przycisk z tekstem `Zaloguj`, `Zaloguj się`, `Sign in`, `Log in`, lub `mcp__playwright__browser_press_key(key="Enter")` w polu hasła.
 6. `mcp__playwright__browser_wait_for(time=2)`.
 7. `mcp__playwright__browser_snapshot()` — zweryfikuj sukces. Heurystyki sukcesu:
@@ -83,13 +95,28 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
 8. Jeśli sukces → przejdź do Kroku 3.
 9. Jeśli login się nie udał (komunikat błędu, formularz nadal widoczny po 2s): oznacz wszystkie 4 kluby × 5 dat z grupy `kluby` jako `notChecked` z reason `"login failed: <krótki opis>"`. Idź dalej do Kroku 3 dla samych klubów Playtomic. **Bez retry loginu** — albo działa za pierwszym razem, albo poddajemy się.
 
-**Bezpieczeństwo:** nie loguj wartości `$KLUBY_PASSWORD` ani snapshotów strony logowania zawierających pole hasła do żadnego outputu (stdout, mail). Jeśli musisz zacytować błąd loginu w mailu — tylko krótki opis bez zrzutu DOM.
+**Bezpieczeństwo:** nie loguj wartości `$KLUBY_PASSWORD` ani snapshotów strony logowania zawierających pole hasła do żadnego outputu (stdout, mail, treść JS w `browser_evaluate` cytowana w odpowiedzi). Plik `/tmp/.kluby_pwd` musi zostać usunięty po użyciu. Jeśli musisz zacytować błąd loginu w mailu — tylko krótki opis bez zrzutu DOM.
 
 ---
 
 ## Krok 3 — Scrape
 
-Inicjalizacja: brak — sesja Chromium już aktywna od Kroku 2.5 (lub od pierwszego navigate w Kroku 3, jeśli login został pominięty).
+### Inicjalizacja parserów (raz, na początku kroku)
+
+Read oba pliki parserów raz i trzymaj treść w pamięci jako stringi `KLUBY_JS` i `PLAYTOMIC_JS`:
+
+- `Read .claude/skills/padel-check/parse-kluby.js` → `KLUBY_JS`
+- `Read .claude/skills/padel-check/parse-playtomic.js` → `PLAYTOMIC_JS`
+
+Każdy plik to **jedna funkcja arrow** (`() => { ... }`) zawierająca pełną logikę ekstrakcji wolnych okien dla danej grupy klubów. Jej treść zostanie przekazana 1:1 jako parametr `function` do `mcp__playwright__browser_evaluate`. Nie modyfikuj treści — funkcje są starannie wyważone (rowspan, AM/PM, dominance pruning) i każda zmiana to ryzyko regresji.
+
+### Browser install fallback
+
+Pierwszy `mcp__playwright__browser_navigate` po starcie sesji może zwrócić błąd `Browser 'chrome-for-testing' is not installed`. Wtedy odpal `npx -y @playwright/mcp install-browser chrome-for-testing` przez `Bash` i powtórz nawigację. Setup script routine'a powinien to robić wcześniej, ale obsłuż awaryjnie.
+
+### Pętla scrape
+
+Sesja Chromium już aktywna od Kroku 2.5 (lub od pierwszego navigate, jeśli login został pominięty).
 
 Iteruj sekwencyjnie po `(klub × data)` = 30 par. **Bez równoległości** — pojedyncza instancja browsera w MCP.
 
@@ -99,60 +126,35 @@ Dla każdej pary:
 
 1. URL = `urlTemplate` z podstawioną `{date}`.
 2. `mcp__playwright__browser_navigate(url=URL)`.
-3. `mcp__playwright__browser_wait_for(time=2)` aby SPA zdążyło zarenderować, a dla kluby.org w razie czego dociągnęło DOM.
-4. `mcp__playwright__browser_snapshot()` — pobierz accessibility tree.
-5. Przeparsuj snapshot wg reguł poniżej. Zapisz wynik jako tablicę `freeWindows` per kort: `{ courtName, start: "HH:MM", end: "HH:MM", durationMin }`.
-6. Przy błędzie / pustym snapshocie / 4xx / 5xx / Cloudflare: dopisz wpis do `notChecked` w postaci `{ club: displayName, date, reason }` i przejdź dalej. **Bez retry.**
+3. `mcp__playwright__browser_wait_for(time=2)` (kluby.org) lub `time=3` (Playtomic SPA potrzebuje dłuższej hydratacji).
+4. `mcp__playwright__browser_evaluate(function=KLUBY_JS)` dla `group=="kluby"` lub `function=PLAYTOMIC_JS` dla `group=="playtomic"`.
+5. Wynik jest tablicą okien:
+   - `kluby`: `{ courtName, start, end, durationMin }`
+   - `playtomic`: `{ start, end, durationMin, numCourts }` (już po dominance pruning, see parse-playtomic.js)
+6. Jeśli wynik ma kształt `{ error: "..." }` (np. `"no grafik table (not logged in?)"`) lub jest pustą tablicą przy błędzie nawigacji → dopisz wpis do `notChecked` w postaci `{ club: displayName, date, reason }` i przejdź dalej. **Bez retry.**
+7. Pusta tablica `[]` z poprawnie załadowanej strony oznacza po prostu brak wolnych okien ≥90 min — to NIE jest błąd, NIE dopisuj do `notChecked`.
 
 Po wszystkich parach: `mcp__playwright__browser_close()` żeby zwolnić zasoby.
 
-### Reguły parsowania
+### Co robią parsery (referencja)
 
-#### Grupa `kluby` (kluby.org)
+**`parse-kluby.js`** — odnajduje `table.table-grafik` (oraz floating header `floatThead-table`), buduje 2D grid honorujący `rowspan`/`colspan`, dla każdego kortu i zakresu 17:00–22:30 znajduje wszystkie ciągłe sekwencje wolnych komórek (`Rezerwuj`) i zwraca okna ≥90 min, `end` przycięte do 23:00. Jeśli tabela nie istnieje (najczęściej: brak loginu) → `{ error: ... }`.
 
-Tabela grafiku: kolumny = korty (nagłówki kolumn = nazwy kortów), wiersze = sloty 30-min (godziny od ~07:00 do ~23:00).
-
-- Komórka z **tekstem "Rezerwuj"** lub linkiem o tekście "Rezerwuj" = kort wolny w tym 30-min slocie.
-- Komórka pusta / z imieniem rezerwującego / "Zarezerwowane" = zajęte.
-
-Dla każdej kolumny (kortu):
-1. Wybierz wiersze odpowiadające godzinom 17:00–22:30 (ostatni 30-min slot kończy się o 23:00).
-2. Znajdź **najdłuższą ciągłą sekwencję wolnych komórek**.
-3. Przelicz na okno: `start` = godzina pierwszej wolnej komórki, `end` = godzina pierwszej wolnej + 30·n minut, gdzie n = długość sekwencji.
-4. Jeśli `(end - start) ≥ 90 minut` → dopisz do `freeWindows`. Inaczej odrzuć.
-
-Jeśli kort ma kilka rozłącznych wolnych okien w 17–23 (np. 17:00–18:30 i 21:00–23:00) → bierz **każde z nich**, jeśli ≥1.5h. Implementacja: po znalezieniu maksymalnego okna kontynuuj skanowanie od jego końca.
-
-#### Grupa `playtomic` (playtomic.com)
-
-Playtomic to React SPA — snapshot zawiera siatkę dostępności jako lista przycisków/komórek z aria-label opisującym godzinę i status.
-
-- Każda komórka = jeden slot na konkretnym korcie o konkretnej godzinie.
-- Wolny slot: zwykle ma `aria-label` typu "X minut" / "Book" / nie-disabled, lub klasę CSS bez modyfikatora `unavailable`/`occupied`.
-- Zajęty: aria-disabled, klasa zawierająca `unavailable` lub brak interakcji.
-- Granularność zwykle 30 lub 60 minut zależnie od klubu.
-
-**Strategia parsowania (snapshot accessibility tree):**
-
-1. Zidentyfikuj nazwy kortów (zwykle nagłówki wierszy lub `aria-label` całej linii: "Court 1", "Pista 1" itp.).
-2. Dla każdego kortu wyciągnij listę dostępnych godzin startu (przyciski "book" / "available").
-3. Posortuj godziny rosnąco. Filtruj do zakresu starts ∈ [17:00, 22:30] (dla 30-min) lub [17:00, 22:00] (dla 60-min, bo +1h jeszcze mieści się w 23:00).
-4. Wykryj granularność: jeśli różnice między kolejnymi dostępnymi slotami to wielokrotność 30 min — granularność 30 min; jeśli 60 — 60.
-5. Znajdź najdłuższą ciągłą sekwencję dostępnych slotów: kolejne starty muszą być oddalone o `granularność`.
-6. `start` = pierwszy slot, `end` = ostatni slot + granularność, `durationMin = end - start`. Jeśli `end > 23:00` przytnij do 23:00.
-7. Jeśli `durationMin ≥ 90` → dopisz do `freeWindows`. W razie kilku rozłącznych okien — każde osobno.
-
-**Half-cell (pół-wolne):** jeśli snapshot ujawnia osobne sloty 30-min (np. dwa komponenty 17:00 i 17:30 dla godziny 17–18), parsing automatycznie to obsłuży. Jeśli klub ma tylko sloty 60-min — half-cell ignorujemy (traktujemy całą godzinę jako jednostkę).
-
-**Awaryjnie**, jeśli accessibility snapshot nie pozwala odróżnić wolnych od zajętych: użyj `mcp__playwright__browser_evaluate` z funkcją która zwróci listę kortów + dostępnych godzin czytając DOM bezpośrednio (np. `document.querySelectorAll('[data-testid="time-slot"]')`). Eksperymentuj na pierwszej parze, potem zastosuj ten sam selektor do reszty.
+**`parse-playtomic.js`** — odnajduje `details.group/slot`, parsuje czas startu (AM/PM), liczbę dostępnych kortów (`N options`) i wszystkie sub-czasy trwania (`•60 min`, `•90 min`, ...). Filtruje do `start ∈ [17:00, 23:00)` i przyciętego `durationMin ≥ 90`. Następnie aplikuje **dominance pruning per start**: dla danej godziny startu zostawia okno tylko wtedy, gdy oferuje *więcej* kortów niż każde dłuższe okno z tej samej godziny — eliminuje informacyjnie redundantne wpisy (np. `17:00–18:30 (1.5h, 3 korty)` znika, jeśli istnieje `17:00–19:00 (2h, 3 korty)`).
 
 ---
 
 ## Krok 4 — Filtr okien + agregacja
 
-1. Odrzuć `freeWindows` z `durationMin < 90` (już powinno być zfiltrowane, ale upewnij się).
-2. Przytnij okna do zakresu 17:00–23:00: `start = max(start, 17:00)`, `end = min(end, 23:00)`. Jeśli po przycięciu `< 90 min` → odrzuć.
-3. **Agregacja:** dla każdego unikalnego trio `(klub, data, start, end)` policz liczbę kortów. Wpis raportu = `{ klub, data, start, end, durationMin, courtsCount }`.
+Parsery z Kroku 3 już:
+- filtrują `durationMin ≥ 90`,
+- przycinają `end` do 23:00,
+- (Playtomic) wykonują dominance pruning per start.
+
+Tutaj zostaje tylko **agregacja per klub × data**, dająca jednolite wpisy raportu `{ klub, data, start, end, durationMin, courtsCount }`:
+
+- **`group == "kluby"`** — wynik parsera to lista okien per kort (`{ courtName, start, end, durationMin }`). Group by `(start, end)` w obrębie pary `(klub, data)`, `courtsCount = liczba kortów w grupie`. Rozdzielne okna na tym samym korcie traktuj jak osobne wpisy.
+- **`group == "playtomic"`** — wynik parsera to już lista `{ start, end, durationMin, numCourts }` po pruning. Mapuj 1:1 na `courtsCount = numCourts`. Bez dalszej agregacji.
 
 ---
 
