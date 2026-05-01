@@ -73,10 +73,19 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
 
 ### Procedura
 
+**0. Odczytaj env vars do konkretnych wartości** (przed jakąkolwiek interakcją z formularzem). `mcp__playwright__browser_type` **NIE** wykonuje shell expansion — jeśli przekażesz literalny string `"$KLUBY_USERNAME"` lub `"${KLUBY_USERNAME}"` jako wartość pola `text`, to dokładnie taki literał trafi do pola loginu, login się nie powiedzie. Najpierw odczytaj wartości przez Bash:
+
+```bash
+printenv KLUBY_USERNAME
+printenv KLUBY_PASSWORD
+```
+
+Output zawierający rzeczywiste wartości (np. `padel@example.com` i hasło) zapamiętaj w kontekście. W kolejnych wywołaniach `browser_type` przekazuj **te konkretne stringi** jako `text`, nie placeholdery.
+
 1. `mcp__playwright__browser_navigate(url="https://kluby.org/login")`. Jeśli redirect wskazuje że jest inna ścieżka loginu (np. `/users/sign_in`, `/zaloguj`) — podążaj za redirectem. Jeśli login jest modalem na homepage zamiast osobną stroną: navigate do `https://kluby.org/`, potem `mcp__playwright__browser_click` na link/przycisk z tekstem "Zaloguj" / "Zaloguj się" / "Login".
 2. `mcp__playwright__browser_snapshot()` — zidentyfikuj formularz logowania.
-3. Znajdź pole loginu/emaila — szukaj inputa z labelem/placeholderem zawierającym jedno z: `email`, `e-mail`, `login`, `nazwa użytkownika`, `username`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_USERNAME)`.
-4. Znajdź pole hasła — input typu `password` lub label zawierający `hasło`, `password`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_PASSWORD)`.
+3. Znajdź pole loginu/emaila — szukaj inputa z labelem/placeholderem zawierającym jedno z: `email`, `e-mail`, `login`, `nazwa użytkownika`, `username`. `mcp__playwright__browser_type(element, ref, text=<wartość KLUBY_USERNAME odczytana w kroku 0>)`.
+4. Znajdź pole hasła — input typu `password` lub label zawierający `hasło`, `password`. `mcp__playwright__browser_type(element, ref, text=<wartość KLUBY_PASSWORD odczytana w kroku 0>)`.
 5. Submit — kliknij przycisk z tekstem `Zaloguj`, `Zaloguj się`, `Sign in`, `Log in`, lub `mcp__playwright__browser_press_key(key="Enter")` w polu hasła.
 6. `mcp__playwright__browser_wait_for(time=2)`.
 7. `mcp__playwright__browser_snapshot()` — zweryfikuj sukces. Heurystyki sukcesu:
@@ -86,7 +95,10 @@ Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje �
 8. Jeśli sukces → przejdź do Kroku 3.
 9. Jeśli login się nie udał (komunikat błędu, formularz nadal widoczny po 2s): oznacz wszystkie kluby z grupy `kluby` × 5 dat (zwykle 3 kluby = 15 par) jako `notChecked` z konkretnym reason (np. `"login failed: Nieprawidłowy login"` jeśli widzisz taki komunikat, lub `"login failed: form still visible after submit"` jeśli zgadujesz). Dopisz każdą z tych par do `processedPairs`. Idź dalej do Kroku 3 dla klubów Playtomic. **Bez retry loginu.**
 
-**Bezpieczeństwo:** nie loguj wartości `$KLUBY_PASSWORD` ani snapshotów strony logowania zawierających pole hasła do żadnego outputu (stdout, mail, raport). Komunikat błędu w mailu może zawierać tekst widoczny dla anonimowego usera (np. "Nieprawidłowy login"), ale **nie** zrzutu DOM ani wpisanej wartości pola.
+**Bezpieczeństwo:**
+- Wartość `KLUBY_PASSWORD` **musi** trafić do tool call'a `browser_type` (inaczej login nie zadziała) — będzie widoczna w logu run'u Routine. Logi runów widzi tylko właściciel konta Claude Code on the web — to akceptowalna powierzchnia dla użytkownika single-tenant.
+- `KLUBY_PASSWORD` **nie** może trafić do: maila wysyłanego do `MAIL_TO`, raportu HTML/text, do stdout poza tool call'em, do commit'ów w repo, do żadnego pliku zapisywanego na dysk.
+- Nie cytuj snapshotów strony logowania zawierających pole hasła w mailu ani w raporcie. Komunikat błędu w mailu może zawierać tekst widoczny dla anonimowego usera (np. "Nieprawidłowy login"), ale nie zrzutu DOM ani wpisanej wartości pola.
 
 ---
 
