@@ -172,6 +172,54 @@ Playtomic to React SPA — snapshot zawiera siatkę dostępności jako lista prz
 
 **Awaryjnie**, jeśli accessibility snapshot nie pozwala odróżnić wolnych od zajętych: użyj `mcp__playwright__browser_evaluate` z funkcją która zwróci listę kortów + dostępnych godzin czytając DOM bezpośrednio (np. `document.querySelectorAll('[data-testid="time-slot"]')`).
 
+### Implementation notes — selektory zaobserwowane w runach
+
+Konkretne selektory wypracowane podczas wcześniejszych runów. **Używaj jako pierwszego strzału** zamiast eksperymentowania od zera. Jeśli przestaną działać (redesign strony) — wróć do heurystyki ze snapshotu i zaktualizuj tę sekcję.
+
+#### kluby.org — DOM jest stabilny, parsuj przez `browser_evaluate`
+
+Strona ma kilka tabel — **grafik to `document.querySelectorAll('table')[3]`**, a header z nazwami kortów to **`[2]`** (osobne tabele dla nagłówka i body, dlatego `<thead>` w `[3]` może być pusty).
+
+Idź wprost do `mcp__playwright__browser_evaluate`, nie marnuj turn na snapshot:
+
+```js
+// w browser_evaluate:
+const headerTable = document.querySelectorAll('table')[2];
+const bodyTable = document.querySelectorAll('table')[3];
+const courtNames = [...headerTable.querySelectorAll('th')]
+  .map(th => th.textContent.trim())
+  .filter(Boolean);
+const rows = [...bodyTable.querySelectorAll('tr')];
+// rows[i] to slot 30-min; pierwsza komórka to godzina, kolejne to korty
+// kolejność kortów odpowiada courtNames
+```
+
+- Komórki z **linkiem o tekście "Rezerwuj"** (zwykle `<a>Rezerwuj</a>`) = wolne.
+- Komórki bez "Rezerwuj" (puste, "Zarezerwowane", imię i nazwisko) = zajęte.
+- **Rowspan**: rezerwacje 1h+ używają `rowspan=2` lub więcej. Komórka rezerwacji w wierszu N "zajmuje" też wiersze N+1, N+2 dla swojego kortu, mimo że w nich fizycznie nie ma `<td>`. Uwzględnij to przy mapowaniu komórek na sloty czasowe (np. trzymaj `nextFreeRow[courtIdx]` i przeskakuj wierze pokryte rowspanem).
+
+#### Playtomic — sloty w `<details class="group/slot">`
+
+Dostępne sloty są w **`<details class="group/slot">`**. Każdy `<details>` reprezentuje pojedynczą godzinę startu na konkretnym korcie i zawiera:
+- `<summary>` z godziną startu (np. `"20:00"`),
+- listę opcji czasu trwania w treści (zwykle `60` / `90` / `120` min — zależnie od dostępności kolejnych slotów).
+
+```js
+const slots = [...document.querySelectorAll('details.group\\/slot')];
+// dla każdego: court name (z najbliższego rodzica/aria), start time (z summary),
+// available durations (z linków/przycisków wewnątrz)
+```
+
+- **Filtr singla**: korty z nagłówkiem / `aria-label` typu `"kort N Singiel"` — pomijaj (zgodnie z regułą `/singl/i` z sekcji "Filtr kortów singlowych").
+- **Strategia długości**: dla każdego dostępnego startu na korcie weź **maksymalny czas trwania** dostępny w tym `<details>`. To wyznacza koniec slotu. Przykład: start `20:00` z opcjami `60/90/120` → slot `20:00–22:00`.
+- Jeśli w `<details>` jest tylko jedna opcja (np. tylko `60` min) — to zwykle oznacza brak ciągłości na ten kort dłużej. Bierz to co jest, union w Kroku 4 połączy.
+- Niektóre kluby mają nagłówki kortów po polsku (`"Kort 1"`), inne po angielsku (`"Court 1"`) lub hiszpańsku (`"Pista 1"`). Heurystyka filtra singla i identyfikacja kortu powinny być case/lang-insensitive.
+
+#### Wspólne — preferowany workflow per pair
+
+1. `browser_navigate(URL)` → `browser_wait_for(time=2)` → **`browser_evaluate(parser)` zwraca `rawSlots[]` od razu**.
+2. `browser_snapshot` rzucasz **tylko gdy `evaluate` zwróci podejrzany wynik** (puste, brak kortów, struktura niezgodna z opisem powyżej) — wtedy diagnozujesz przez snapshot i, jeśli odkryjesz nową strukturę, **zaktualizuj tę sekcję** w nowym PR.
+
 ---
 
 ## Krok 4 — Union okien + filtr
