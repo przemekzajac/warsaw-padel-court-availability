@@ -1,0 +1,38 @@
+[
+  {
+    "key": "padlovnia",
+    "displayName": "Padlovnia",
+    "group": "kluby",
+    "urlTemplate": "https://kluby.org/padlovnia/grafik?data_grafiku={date}&dyscyplina=4&strona=0"
+  },
+  {
+    "key": "mana-padel",
+    "displayName": "Mana Padel",
+    "group": "kluby",
+    "urlTemplate": "https://kluby.org/mana-padel/grafik?data_grafiku={date}&dyscyplina=4&strona=0"
+  },
+  {
+    "key": "toro-padel",
+    "displayName": "Toro Padel",
+    "group": "kluby",
+    "urlTemplate": "https://kluby.org/toro-padel/grafik?data_grafiku={date}&dyscyplina=4&strona=0"
+  },
+  {
+    "key": "loba-padel",
+    "displayName": "Loba Padel",
+    "group": "kluby",
+    "urlTemplate": "https://kluby.org/loba-padel/grafik?data_grafiku={date}&dyscyplina=4&strona=0"
+  },
+  {
+    "key": "interpadel-warszawa",
+    "displayName": "Inter Padel Warszawa",
+    "group": "playtomic",
+    "urlTemplate": "https://playtomic.com/clubs/interpadel-warszawa?date={date}"
+  },
+  {
+    "key": "warsaw-padel-club",
+    "displayName": "Warsaw Padel Club",
+    "group": "playtomic",
+    "urlTemplate": "https://playtomic.com/clubs/warsaw-padel-club?date={date}"
+  }
+]
