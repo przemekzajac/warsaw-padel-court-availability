@@ -128,6 +128,14 @@ Po wszystkich parach: `mcp__playwright__browser_close()`.
 
 ### Reguły parsowania
 
+#### Filtr kortów singlowych (wspólny dla obu grup)
+
+**Pomijaj korty oznaczone jako singlowe** — gracz interesuje się tylko kortami deblowymi (do gry 2v2).
+
+Kort jest singlowy, jeśli jego nazwa / nagłówek kolumny / `aria-label` zawiera (case-insensitive) podciąg `singl`. Pasuje do wszystkich form: `single`, `Single`, `SINGLES`, `singiel`, `Singla`, `Kort singlowy`, `Pole singlowe`, `padel single`, itd. Polski rdzeń `singl-` i angielski `singl-` mają wspólny prefix, więc jedno sprawdzenie wystarczy.
+
+Jeśli nazwa kortu pasuje do tego wzorca → **w ogóle nie generuj `rawSlots` dla tego kortu**. Jego dostępność nie wchodzi do unionu w Kroku 4.
+
 #### Grupa `kluby` (kluby.org)
 
 Tabela grafiku: kolumny = korty (nagłówki kolumn = nazwy kortów), wiersze = sloty 30-min (godziny od ~07:00 do ~23:00).
