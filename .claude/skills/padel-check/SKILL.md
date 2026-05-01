@@ -148,7 +148,25 @@ Po wszystkich parach: `mcp__playwright__browser_close()`.
 
 **Warstwa 1 — explicit `skipCourts` z `clubs.json`** (deterministyczne):
 
-Niektóre kluby są w `clubs.json` z polem `skipCourts: [...]`. To są **znane** korty singlowe które ten klub nie oznacza w widocznym DOM-ie. Przy parsowaniu danego klubu pomiń każdy kort którego nazwa pasuje (case-insensitive substring match) do dowolnego elementu z `skipCourts`. Przykład: `interpadel-warszawa` ma `["kort 10", "kort 11"]` — odrzuć korty których etykieta zawiera `kort 10` lub `kort 11`.
+Niektóre kluby są w `clubs.json` z polem `skipCourts: [...]`. To są **znane** korty singlowe które ten klub nie oznacza w widocznym DOM-ie. Przy parsowaniu danego klubu pomiń każdy kort którego nazwa pasuje **word-boundary case-insensitive** do dowolnego elementu z `skipCourts`.
+
+**Krytyczne — używaj `\b...\b` regex, NIE substring `.includes()`.** Substring match daje fałszywe pozytywy: `"kort 11".includes("kort 1") === true` powodowałoby wykluczenie deblowego `kort 1` w klubie z `skipCourts: ["kort 11"]`. Word boundary rozwiązuje to: `/\bkort 1\b/i.test("kort 11") === false` (cyfra `1` nie jest na granicy słowa, bo następna cyfra `1` przedłuża "słowo").
+
+Implementacja w `browser_evaluate`:
+
+```js
+function shouldSkipCourt(courtName, skipCourts) {
+  return skipCourts.some(item => {
+    const escaped = item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`\\b${escaped}\\b`, 'i').test(courtName);
+  });
+}
+// shouldSkipCourt("kort 11", ["kort 10", "kort 11"]) → true   (poprawnie skipuje)
+// shouldSkipCourt("kort 1",  ["kort 10", "kort 11"]) → false  (poprawnie zachowuje)
+// shouldSkipCourt("Court 11", ["Court 11"])         → true   (case-insensitive)
+```
+
+Przykład: `interpadel-warszawa` ma `skipCourts: ["kort 10", "kort 11"]`. Poprawnie odrzuci `"kort 10"` i `"kort 11"`, ale **zachowa** `"kort 1"`, `"kort 2"`, ..., `"kort 9"` (wszystkie deblowe).
 
 **Warstwa 2 — heurystyka DOM** (catch-all):
 
