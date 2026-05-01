@@ -8,6 +8,9 @@ allowed-tools:
   - mcp__playwright__browser_wait_for
   - mcp__playwright__browser_snapshot
   - mcp__playwright__browser_evaluate
+  - mcp__playwright__browser_click
+  - mcp__playwright__browser_type
+  - mcp__playwright__browser_press_key
   - mcp__playwright__browser_close
 ---
 
@@ -19,10 +22,21 @@ Jesteś agentem zbierającym dostępność kortów padlowych. Wykonaj zadanie au
 
 1. Wyznacz daty (krok 1)
 2. Załaduj kluby (krok 2)
-3. Scrape (krok 3)
-4. Filtr okien + agregacja (krok 4)
-5. Render markdown (krok 5)
-6. Wyślij email (krok 6) — **zawsze, niezależnie od wyniku**
+3. **Login do kluby.org (krok 2.5)** — wymagane, grafiki widoczne tylko dla zalogowanych
+4. Scrape (krok 3)
+5. Filtr okien + agregacja (krok 4)
+6. Render markdown (krok 5)
+7. Wyślij email (krok 6) — **zawsze, niezależnie od wyniku**
+
+## Wymagane env vars
+
+| Zmienna | Opis |
+|---|---|
+| `RESEND_API_KEY` | Klucz API z resend.com |
+| `MAIL_TO` | Adres odbiorcy raportu |
+| `MAIL_FROM` | Adres nadawcy (np. `onboarding@resend.dev`) |
+| `KLUBY_USERNAME` | Login na kluby.org (email lub nick) |
+| `KLUBY_PASSWORD` | Hasło na kluby.org |
 
 ---
 
@@ -48,11 +62,38 @@ Read `.claude/skills/padel-check/clubs.json`. Dla każdego klubu masz `key`, `di
 
 ---
 
+## Krok 2.5 — Login do kluby.org
+
+**Wymagane** — kluby.org pokazuje grafik rezerwacji **tylko zalogowanym** użytkownikom (anonimowi widzą stronę bez tabeli). Login wykonaj **raz** na początku, sesja Playwright zachowa cookie dla wszystkich kolejnych nawigacji.
+
+Wymagane env vars: `KLUBY_USERNAME`, `KLUBY_PASSWORD`. Jeśli któraś brakuje — pomiń login, oznacz wszystkie 4 kluby × 5 dat z grupy `kluby` jako `notChecked` z reason `"missing kluby.org credentials"` i przejdź do Kroku 3 (Playtomic nadal może być scrape'owany).
+
+### Procedura
+
+1. `mcp__playwright__browser_navigate(url="https://kluby.org/login")`. Jeśli redirect wskazuje że jest inna ścieżka loginu (np. `/users/sign_in`, `/zaloguj`) — podążaj za redirectem. Jeśli login jest modalem na homepage zamiast osobną stroną: navigate do `https://kluby.org/`, potem `mcp__playwright__browser_click` na link/przycisk z tekstem "Zaloguj" / "Zaloguj się" / "Login".
+2. `mcp__playwright__browser_snapshot()` — zidentyfikuj formularz logowania.
+3. Znajdź pole loginu/emaila — szukaj inputa z labelem/placeholderem zawierającym jedno z: `email`, `e-mail`, `login`, `nazwa użytkownika`, `username`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_USERNAME)`.
+4. Znajdź pole hasła — input typu `password` lub label zawierający `hasło`, `password`. `mcp__playwright__browser_type(element, ref, text=$KLUBY_PASSWORD)`.
+5. Submit — kliknij przycisk z tekstem `Zaloguj`, `Zaloguj się`, `Sign in`, `Log in`, lub `mcp__playwright__browser_press_key(key="Enter")` w polu hasła.
+6. `mcp__playwright__browser_wait_for(time=2)`.
+7. `mcp__playwright__browser_snapshot()` — zweryfikuj sukces. Heurystyki sukcesu:
+   - URL przestaje zawierać `/login`
+   - W snapshocie widać element wskazujący zalogowanego usera (np. link "Wyloguj", "Moje konto", inicjały / avatar usera, sekcja `nav` z user menu)
+   - Brak komunikatu błędu typu `Nieprawidłowy login`, `Invalid credentials`
+8. Jeśli sukces → przejdź do Kroku 3.
+9. Jeśli login się nie udał (komunikat błędu, formularz nadal widoczny po 2s): oznacz wszystkie 4 kluby × 5 dat z grupy `kluby` jako `notChecked` z reason `"login failed: <krótki opis>"`. Idź dalej do Kroku 3 dla samych klubów Playtomic. **Bez retry loginu** — albo działa za pierwszym razem, albo poddajemy się.
+
+**Bezpieczeństwo:** nie loguj wartości `$KLUBY_PASSWORD` ani snapshotów strony logowania zawierających pole hasła do żadnego outputu (stdout, mail). Jeśli musisz zacytować błąd loginu w mailu — tylko krótki opis bez zrzutu DOM.
+
+---
+
 ## Krok 3 — Scrape
 
-Inicjalizacja: brak — pierwsze `mcp__playwright__browser_navigate` startuje sesję Chromium.
+Inicjalizacja: brak — sesja Chromium już aktywna od Kroku 2.5 (lub od pierwszego navigate w Kroku 3, jeśli login został pominięty).
 
 Iteruj sekwencyjnie po `(klub × data)` = 30 par. **Bez równoległości** — pojedyncza instancja browsera w MCP.
+
+**Skip:** pomiń pary już oznaczone jako `notChecked` w Kroku 2.5 (kluby.org bez sukcesu loginu).
 
 Dla każdej pary:
 

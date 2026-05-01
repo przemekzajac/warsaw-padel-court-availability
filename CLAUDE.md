@@ -38,6 +38,10 @@ Definicje + URL templates: `.claude/skills/padel-check/clubs.json`.
 | `RESEND_API_KEY` | Klucz API z resend.com |
 | `MAIL_TO` | Adres odbiorcy raportu |
 | `MAIL_FROM` | Adres nadawcy (np. `onboarding@resend.dev` lub własna zweryfikowana domena) |
+| `KLUBY_USERNAME` | Login na kluby.org — grafik widoczny tylko po zalogowaniu |
+| `KLUBY_PASSWORD` | Hasło na kluby.org |
+
+**Bezpieczeństwo:** `KLUBY_PASSWORD` nigdy nie trafia do logu/maila/repo. Skill ma instrukcję nie cytować snapshotów strony logowania.
 
 ## Wymagany setup script
 
