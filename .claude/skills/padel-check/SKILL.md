@@ -432,15 +432,19 @@ Jeśli **wszystkie** 30 par jest w `notChecked` → raport zawiera tylko nagłó
 
 **Wysyłaj zawsze**, niezależnie od wyniku.
 
-### Subject — z zakresem dat (rozdziela wątki w Gmailu)
+### Subject — z zakresem dat + datą wygenerowania
 
-Format: `Padel WWA — DD.MM–DD.MM.YYYY`
+Format: `Padel WWA — DD.MM–DD.MM.YYYY (DD.MM.YYYY)`
 
-`DD.MM` = pierwsza i ostatnia z 5 sprawdzonych dat (rok = rok ostatniej daty, zwykle ten sam dla obu).
+- Pierwszy człon (`DD.MM–DD.MM.YYYY`) = pierwsza i ostatnia z 5 sprawdzonych dat (rok = rok ostatniej daty, zwykle ten sam dla obu).
+- Drugi człon w nawiasie (`(DD.MM.YYYY)`) = data wygenerowania raportu (dzisiaj, z `TZ=Europe/Warsaw date +%d.%m.%Y` z Kroku 1).
 
-Przykład: dla dat sprawdzonych 04–08.05.2026 → subject `Padel WWA — 04.05–08.05.2026`.
+Przykład: routine odpalona 01.05.2026 sprawdziła dni 04–08.05.2026 → subject:
+```
+Padel WWA — 04.05–08.05.2026 (01.05.2026)
+```
 
-Każdy run innego dnia → inny zakres dat → inny subject → **osobny wątek w Gmailu**. (Jedyny wyjątek: dwa runy w obrębie tego samego okna 5 dni roboczych — rzadkie i wtedy złączenie ma sens.)
+Każdy run innego dnia → inny dzień wygenerowania → inny subject → **osobny wątek w Gmailu**, nawet jeśli zakres sprawdzonych dat jest identyczny (np. dwa runy w piątek dla nadchodzącego pn–pt).
 
 ### Body — HTML + plain text fallback
 
@@ -455,7 +459,7 @@ echo '<plain text raportu z kroku 5>' > "$TEXT_FILE"
 PAYLOAD=$(jq -n \
   --arg from "$MAIL_FROM" \
   --arg to "$MAIL_TO" \
-  --arg subj "Padel WWA — $DATE_FIRST–$DATE_LAST" \
+  --arg subj "Padel WWA — $DATE_FIRST–$DATE_LAST ($TODAY)" \
   --rawfile html "$HTML_FILE" \
   --rawfile text "$TEXT_FILE" \
   '{from: $from, to: [$to], subject: $subj, html: $html, text: $text}')
@@ -466,7 +470,7 @@ curl -fsS -X POST https://api.resend.com/emails \
   -d "$PAYLOAD"
 ```
 
-`$DATE_FIRST` / `$DATE_LAST` formatuj jako `DD.MM` dla pierwszej daty i `DD.MM.YYYY` dla ostatniej.
+`$DATE_FIRST` / `$DATE_LAST` formatuj jako `DD.MM` dla pierwszej daty i `DD.MM.YYYY` dla ostatniej. `$TODAY` = dzień wygenerowania raportu w formacie `DD.MM.YYYY` (z `TZ=Europe/Warsaw date +%d.%m.%Y` z Kroku 1).
 
 Jeśli `jq` niedostępne — zbuduj JSON ręcznie z escapowaniem (np. `node -e 'process.stdout.write(JSON.stringify({...}))'` — pamiętaj że HTML zawiera cudzysłowy, escape jest krytyczny).
 
